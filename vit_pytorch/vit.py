@@ -120,5 +120,5 @@ class ViT(nn.Module):
 
         x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
 
-        x = self.to_latent(x)
+        x = self.to_latent(x)   # Issue https://github.com/lucidrains/vit-pytorch/issues/46: used for BYOL, useless only in ViT
         return self.mlp_head(x)
