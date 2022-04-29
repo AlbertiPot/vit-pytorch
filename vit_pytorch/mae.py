@@ -71,6 +71,10 @@ class MAE(nn.Module):
 
         decoder_tokens = self.enc_to_dec(encoded_tokens)
 
+        # reapply decoder position embedding to unmasked tokens
+
+        decoder_tokens = decoder_tokens + self.decoder_pos_emb(unmasked_indices)
+
         # repeat mask tokens for number of masked, and add the positions using the masked indices derived above
 
         mask_tokens = repeat(self.mask_token, 'd -> b n d', b = batch, n = num_masked)
@@ -78,12 +82,12 @@ class MAE(nn.Module):
 
         # concat the masked tokens to the decoder tokens and attend with decoder
 
-        decoder_tokens = torch.cat((decoder_tokens, mask_tokens), dim = 1)
+        decoder_tokens = torch.cat((mask_tokens, decoder_tokens), dim = 1)
         decoded_tokens = self.decoder(decoder_tokens)
 
         # splice out the mask tokens and project to pixel values
 
-        mask_tokens = decoded_tokens[:, -num_masked:]
+        mask_tokens = decoded_tokens[:, :num_masked]
         pred_pixel_values = self.to_pixels(mask_tokens)
 
         # calculate reconstruction loss

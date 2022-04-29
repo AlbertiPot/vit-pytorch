@@ -30,9 +30,9 @@ class LayerNorm(nn.Module): # layernorm, but done in the channel dimension #1
         self.b = nn.Parameter(torch.zeros(1, dim, 1, 1))
 
     def forward(self, x):
-        std = torch.var(x, dim = 1, unbiased = False, keepdim = True).sqrt()
+        var = torch.var(x, dim = 1, unbiased = False, keepdim = True)
         mean = torch.mean(x, dim = 1, keepdim = True)
-        return (x - mean) / (std + self.eps) * self.g + self.b
+        return (x - mean) / (var + self.eps).sqrt() * self.g + self.b
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -76,6 +76,7 @@ class Attention(nn.Module):
         self.scale = dim_head ** -0.5
 
         self.attend = nn.Softmax(dim = -1)
+        self.dropout = nn.Dropout(dropout)
 
         self.to_q = DepthWiseConv2d(dim, inner_dim, proj_kernel, padding = padding, stride = 1, bias = False)
         self.to_kv = DepthWiseConv2d(dim, inner_dim * 2, proj_kernel, padding = padding, stride = kv_proj_stride, bias = False)
@@ -94,6 +95,7 @@ class Attention(nn.Module):
         dots = einsum('b i d, b j d -> b i j', q, k) * self.scale
 
         attn = self.attend(dots)
+        attn = self.dropout(attn)
 
         out = einsum('b i j, b j d -> b i d', attn, v)
         out = rearrange(out, '(b h) (x y) d -> b (h d) x y', h = h, y = y)

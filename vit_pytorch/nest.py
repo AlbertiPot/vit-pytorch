@@ -20,9 +20,9 @@ class LayerNorm(nn.Module):
         self.b = nn.Parameter(torch.zeros(1, dim, 1, 1))
 
     def forward(self, x):
-        std = torch.var(x, dim = 1, unbiased = False, keepdim = True).sqrt()
+        var = torch.var(x, dim = 1, unbiased = False, keepdim = True)
         mean = torch.mean(x, dim = 1, keepdim = True)
-        return (x - mean) / (std + self.eps) * self.g + self.b
+        return (x - mean) / (var + self.eps).sqrt() * self.g + self.b
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -55,6 +55,7 @@ class Attention(nn.Module):
         self.scale = dim_head ** -0.5
 
         self.attend = nn.Softmax(dim = -1)
+        self.dropout = nn.Dropout(dropout)
         self.to_qkv = nn.Conv2d(dim, inner_dim * 3, 1, bias = False)
 
         self.to_out = nn.Sequential(
@@ -71,6 +72,7 @@ class Attention(nn.Module):
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
         attn = self.attend(dots)
+        attn = self.dropout(attn)
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
@@ -131,10 +133,11 @@ class NesT(nn.Module):
 
         seq_len = (fmap_size // blocks) ** 2   # sequence length is held constant across heirarchy
         hierarchies = list(reversed(range(num_hierarchies)))
-        mults = [2 ** i for i in hierarchies]
+        mults = [2 ** i for i in reversed(hierarchies)]
 
         layer_heads = list(map(lambda t: t * heads, mults))
         layer_dims = list(map(lambda t: t * dim, mults))
+        last_dim = layer_dims[-1]
 
         layer_dims = [*layer_dims, layer_dims[-1]]
         dim_pairs = zip(layer_dims[:-1], layer_dims[1:])
@@ -157,10 +160,11 @@ class NesT(nn.Module):
                 Aggregate(dim_in, dim_out) if not is_last else nn.Identity()
             ]))
 
+
         self.mlp_head = nn.Sequential(
-            LayerNorm(dim),
+            LayerNorm(last_dim),
             Reduce('b c h w -> b c', 'mean'),
-            nn.Linear(dim, num_classes)
+            nn.Linear(last_dim, num_classes)
         )
 
     def forward(self, img):

@@ -61,8 +61,13 @@ class Attention(nn.Module):
         inner_dim = dim_head * heads
 
         self.norm = nn.LayerNorm(dim)
+        self.dropout = nn.Dropout(dropout)
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
-        self.to_out = nn.Linear(inner_dim, dim)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        )
 
     def forward(self, x, rel_pos_bias = None):
         h = self.heads
@@ -86,6 +91,7 @@ class Attention(nn.Module):
             sim = sim + rel_pos_bias
 
         attn = sim.softmax(dim = -1)
+        attn = self.dropout(attn)
 
         # merge heads
 
@@ -132,7 +138,7 @@ class R2LTransformer(nn.Module):
         h_range = torch.arange(window_size_h, device = device)
         w_range = torch.arange(window_size_w, device = device)
 
-        grid_x, grid_y = torch.meshgrid(h_range, w_range)
+        grid_x, grid_y = torch.meshgrid(h_range, w_range, indexing = 'ij')
         grid = torch.stack((grid_x, grid_y))
         grid = rearrange(grid, 'c h w -> c (h w)')
         grid = (grid[:, :, None] - grid[:, None, :]) + (self.window_size - 1)
@@ -247,11 +253,7 @@ class RegionViT(nn.Module):
             nn.Linear(last_dim, num_classes)
         )
 
-    def forward(
-        self,
-        x,
-        return_local_tokens = False
-    ):
+    def forward(self, x):
         *_, h, w = x.shape
         assert divisible_by(h, self.region_patch_size) and divisible_by(w, self.region_patch_size), 'height and width must be divisible by region patch size'
         assert divisible_by(h, self.local_patch_size) and divisible_by(w, self.local_patch_size), 'height and width must be divisible by local patch size'

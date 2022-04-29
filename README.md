@@ -16,11 +16,21 @@
 - [LeViT](#levit)
 - [CvT](#cvt)
 - [Twins SVT](#twins-svt)
+- [CrossFormer](#crossformer)
 - [RegionViT](#regionvit)
+- [ScalableViT](#scalablevit)
+- [SepViT](#sepvit)
+- [MaxViT](#maxvit)
 - [NesT](#nest)
+- [MobileViT](#mobilevit)
 - [Masked Autoencoder](#masked-autoencoder)
 - [Simple Masked Image Modeling](#simple-masked-image-modeling)
 - [Masked Patch Prediction](#masked-patch-prediction)
+- [Adaptive Token Sampling](#adaptive-token-sampling)
+- [Patch Merger](#patch-merger)
+- [Vision Transformer for Small Datasets](#vision-transformer-for-small-datasets)
+- [Parallel ViT](#parallel-vit)
+- [Learnable Memory ViT](#learnable-memory-vit)
 - [Dino](#dino)
 - [Accessing Attention](#accessing-attention)
 - [Research Ideas](#research-ideas)
@@ -37,6 +47,8 @@ Implementation of <a href="https://openreview.net/pdf?id=YicbFdNTTy">Vision Tran
 For a Pytorch implementation with pretrained models, please see Ross Wightman's repository <a href="https://github.com/rwightman/pytorch-image-models">here</a>.
 
 The official Jax repository is <a href="https://github.com/google-research/vision_transformer">here</a>.
+
+A tensorflow2 translation also exists <a href="https://github.com/taki0112/vit-tensorflow">here</a>, created by research scientist <a href="https://github.com/taki0112">Junho Kim</a>! 🙏
 
 ## Install
 
@@ -234,6 +246,7 @@ preds = v(img) # (1, 1000)
 ```
 
 ## CCT
+
 <img src="https://raw.githubusercontent.com/SHI-Labs/Compact-Transformers/main/images/model_sym.png" width="400px"></img>
 
 <a href="https://arxiv.org/abs/2104.05704">CCT</a> proposes compact transformers
@@ -245,22 +258,25 @@ You can use this with two methods
 import torch
 from vit_pytorch.cct import CCT
 
-model = CCT(
-        img_size=224,
-        embedding_dim=384,
-        n_conv_layers=2,
-        kernel_size=7,
-        stride=2,
-        padding=3,
-        pooling_kernel_size=3,
-        pooling_stride=2,
-        pooling_padding=1,
-        num_layers=14,
-        num_heads=6,
-        mlp_radio=3.,
-        num_classes=1000,
-        positional_embedding='learnable', # ['sine', 'learnable', 'none']
-        )
+cct = CCT(
+    img_size = (224, 448),
+    embedding_dim = 384,
+    n_conv_layers = 2,
+    kernel_size = 7,
+    stride = 2,
+    padding = 3,
+    pooling_kernel_size = 3,
+    pooling_stride = 2,
+    pooling_padding = 1,
+    num_layers = 14,
+    num_heads = 6,
+    mlp_radio = 3.,
+    num_classes = 1000,
+    positional_embedding = 'learnable', # ['sine', 'learnable', 'none']
+)
+
+img = torch.randn(1, 3, 224, 448)
+pred = cct(img) # (1, 1000)
 ```
 
 Alternatively you can use one of several pre-defined models `[2,4,6,7,8,14,16]`
@@ -271,22 +287,22 @@ and the embedding dimension.
 import torch
 from vit_pytorch.cct import cct_14
 
-model = cct_14(
-        img_size=224,
-        n_conv_layers=1,
-        kernel_size=7,
-        stride=2,
-        padding=3,
-        pooling_kernel_size=3,
-        pooling_stride=2,
-        pooling_padding=1,
-        num_classes=1000,
-        positional_embedding='learnable', # ['sine', 'learnable', 'none']  
-        )
+cct = cct_14(
+    img_size = 224,
+    n_conv_layers = 1,
+    kernel_size = 7,
+    stride = 2,
+    padding = 3,
+    pooling_kernel_size = 3,
+    pooling_stride = 2,
+    pooling_padding = 1,
+    num_classes = 1000,
+    positional_embedding = 'learnable', # ['sine', 'learnable', 'none']
+)
 ```
+
 <a href="https://github.com/SHI-Labs/Compact-Transformers">Official
 Repository</a> includes links to pretrained model checkpoints.
-
 
 ## Cross ViT
 
@@ -493,6 +509,125 @@ img = torch.randn(1, 3, 224, 224)
 pred = model(img) # (1, 1000)
 ```
 
+## CrossFormer
+
+<img src="./images/crossformer.png" width="400px"></img>
+
+<img src="./images/crossformer2.png" width="400px"></img>
+
+This <a href="https://arxiv.org/abs/2108.00154">paper</a> beats PVT and Swin using alternating local and global attention. The global attention is done across the windowing dimension for reduced complexity, much like the scheme used for axial attention.
+
+They also have cross-scale embedding layer, which they shown to be a generic layer that can improve all vision transformers. Dynamic relative positional bias was also formulated to allow the net to generalize to images of greater resolution.
+
+```python
+import torch
+from vit_pytorch.crossformer import CrossFormer
+
+model = CrossFormer(
+    num_classes = 1000,                # number of output classes
+    dim = (64, 128, 256, 512),         # dimension at each stage
+    depth = (2, 2, 8, 2),              # depth of transformer at each stage
+    global_window_size = (8, 4, 2, 1), # global window sizes at each stage
+    local_window_size = 7,             # local window size (can be customized for each stage, but in paper, held constant at 7 for all stages)
+)
+
+img = torch.randn(1, 3, 224, 224)
+
+pred = model(img) # (1, 1000)
+```
+
+## ScalableViT
+
+<img src="./images/scalable-vit-1.png" width="400px"></img>
+
+<img src="./images/scalable-vit-2.png" width="400px"></img>
+
+This Bytedance AI <a href="https://arxiv.org/abs/2203.10790">paper</a> proposes the Scalable Self Attention (SSA) and the Interactive Windowed Self Attention (IWSA) modules. The SSA alleviates the computation needed at earlier stages by reducing the key / value feature map by some factor (`reduction_factor`), while modulating the dimension of the queries and keys (`ssa_dim_key`). The IWSA performs self attention within local windows, similar to other vision transformer papers. However, they add a residual of the values, passed through a convolution of kernel size 3, which they named Local Interactive Module (LIM).
+
+They make the claim in this paper that this scheme outperforms Swin Transformer, and also demonstrate competitive performance against Crossformer.
+
+You can use it as follows (ex. ScalableViT-S)
+
+```python
+import torch
+from vit_pytorch.scalable_vit import ScalableViT
+
+model = ScalableViT(
+    num_classes = 1000,
+    dim = 64,                               # starting model dimension. at every stage, dimension is doubled
+    heads = (2, 4, 8, 16),                  # number of attention heads at each stage
+    depth = (2, 2, 20, 2),                  # number of transformer blocks at each stage
+    ssa_dim_key = (40, 40, 40, 32),         # the dimension of the attention keys (and queries) for SSA. in the paper, they represented this as a scale factor on the base dimension per key (ssa_dim_key / dim_key)
+    reduction_factor = (8, 4, 2, 1),        # downsampling of the key / values in SSA. in the paper, this was represented as (reduction_factor ** -2)
+    window_size = (64, 32, None, None),     # window size of the IWSA at each stage. None means no windowing needed
+    dropout = 0.1,                          # attention and feedforward dropout
+)
+
+img = torch.randn(1, 3, 256, 256)
+
+preds = model(img) # (1, 1000)
+```
+
+## SepViT
+
+<img src="./images/sep-vit.png" width="400px"></img>
+
+Another <a href="https://arxiv.org/abs/2203.15380">Bytedance AI paper</a>, it proposes a depthwise-pointwise self-attention layer that seems largely inspired by mobilenet's depthwise-separable convolution. The most interesting aspect is the reuse of the feature map from the depthwise self-attention stage as the values for the pointwise self-attention, as shown in the diagram above.
+
+I have decided to include only the version of `SepViT` with this specific self-attention layer, as the grouped attention layers are not remarkable nor novel, and the authors were not clear on how they treated the window tokens for the group self-attention layer. Besides, it seems like with `DSSA` layer alone, they were able to beat Swin.
+
+ex. SepViT-Lite
+
+```python
+import torch
+from vit_pytorch.sep_vit import SepViT
+
+v = SepViT(
+    num_classes = 1000,
+    dim = 32,               # dimensions of first stage, which doubles every stage (32, 64, 128, 256) for SepViT-Lite
+    dim_head = 32,          # attention head dimension
+    heads = (1, 2, 4, 8),   # number of heads per stage
+    depth = (1, 2, 6, 2),   # number of transformer blocks per stage
+    window_size = 7,        # window size of DSS Attention block
+    dropout = 0.1           # dropout
+)
+
+img = torch.randn(1, 3, 224, 224)
+
+preds = v(img) # (1, 1000)
+```
+
+## MaxViT
+
+<img src="./images/max-vit.png" width="400px"></img>
+
+<a href="https://arxiv.org/abs/2204.01697">This paper</a> proposes a hybrid convolutional / attention network, using MBConv from the convolution side, and then block / grid axial sparse attention.
+
+They also claim this specific vision transformer is good for generative models (GANs).
+
+ex. MaxViT-S
+
+```python
+import torch
+from vit_pytorch.max_vit import MaxViT
+
+v = MaxViT(
+    num_classes = 1000,
+    dim_conv_stem = 64,               # dimension of the convolutional stem, would default to dimension of first layer if not specified
+    dim = 96,                         # dimension of first layer, doubles every layer
+    dim_head = 32,                    # dimension of attention heads, kept at 32 in paper
+    depth = (2, 2, 5, 2),             # number of MaxViT blocks per stage, which consists of MBConv, block-like attention, grid-like attention
+    window_size = 7,                  # window size for block and grids
+    mbconv_expansion_rate = 4,        # expansion rate of MBConv
+    mbconv_shrinkage_rate = 0.25,     # shrinkage rate of squeeze-excitation in MBConv
+    dropout = 0.1                     # dropout
+)
+
+img = torch.randn(2, 3, 224, 224)
+
+preds = v(img) # (2, 1000)
+```
+
 ## NesT
 
 <img src="./images/nest.png" width="400px"></img>
@@ -511,13 +646,38 @@ nest = NesT(
     dim = 96,
     heads = 3,
     num_hierarchies = 3,        # number of hierarchies
-    block_repeats = (8, 4, 1),  # the number of transformer blocks at each heirarchy, starting from the bottom
+    block_repeats = (2, 2, 8),  # the number of transformer blocks at each heirarchy, starting from the bottom
     num_classes = 1000
 )
 
 img = torch.randn(1, 3, 224, 224)
 
 pred = nest(img) # (1, 1000)
+```
+
+## MobileViT
+
+<img src="./images/mbvit.png" width="400px"></img>
+
+This <a href="https://arxiv.org/abs/2110.02178">paper</a> introduce MobileViT, a light-weight and general purpose vision transformer for mobile devices. MobileViT presents a different
+perspective for the global processing of information with transformers.
+
+You can use it with the following code (ex. mobilevit_xs)
+
+```python
+import torch
+from vit_pytorch.mobile_vit import MobileViT
+
+mbvit_xs = MobileViT(
+    image_size = (256, 256),
+    dims = [96, 120, 144],
+    channels = [16, 32, 48, 48, 64, 64, 80, 80, 96, 96, 384],
+    num_classes = 1000
+)
+
+img = torch.randn(1, 3, 256, 256)
+
+pred = mbvit_xs(img) # (1, 1000)
 ```
 
 ## Simple Masked Image Modeling
@@ -567,6 +727,8 @@ torch.save(v.state_dict(), './trained-vit.pt')
 A new <a href="https://arxiv.org/abs/2111.06377">Kaiming He paper</a> proposes a simple autoencoder scheme where the vision transformer attends to a set of unmasked patches, and a smaller decoder tries to reconstruct the masked pixel values.
 
 <a href="https://www.youtube.com/watch?v=LKixq2S2Pz8">DeepReader quick paper review</a>
+
+<a href="https://www.youtube.com/watch?v=Dp6iICL2dVI">AI Coffeebreak with Letitia</a>
 
 You can use it with the following code
 
@@ -647,6 +809,217 @@ for _ in range(100):
 
 # save your improved network
 torch.save(model.state_dict(), './pretrained-net.pt')
+```
+
+## Adaptive Token Sampling
+
+<img src="./images/ats.png" width="400px"></img>
+
+This <a href="https://arxiv.org/abs/2111.15667">paper</a> proposes to use the CLS attention scores, re-weighed by the norms of the value heads, as means to discard unimportant tokens at different layers.
+
+```python
+import torch
+from vit_pytorch.ats_vit import ViT
+
+v = ViT(
+    image_size = 256,
+    patch_size = 16,
+    num_classes = 1000,
+    dim = 1024,
+    depth = 6,
+    max_tokens_per_depth = (256, 128, 64, 32, 16, 8), # a tuple that denotes the maximum number of tokens that any given layer should have. if the layer has greater than this amount, it will undergo adaptive token sampling
+    heads = 16,
+    mlp_dim = 2048,
+    dropout = 0.1,
+    emb_dropout = 0.1
+)
+
+img = torch.randn(4, 3, 256, 256)
+
+preds = v(img) # (4, 1000)
+
+# you can also get a list of the final sampled patch ids
+# a value of -1 denotes padding
+
+preds, token_ids = v(img, return_sampled_token_ids = True) # (4, 1000), (4, <=8)
+```
+
+## Patch Merger
+
+
+<img src="./images/patch_merger.png" width="400px"></img>
+
+This <a href="https://arxiv.org/abs/2202.12015">paper</a> proposes a simple module (Patch Merger) for reducing the number of tokens at any layer of a vision transformer without sacrificing performance.
+
+```python
+import torch
+from vit_pytorch.vit_with_patch_merger import ViT
+
+v = ViT(
+    image_size = 256,
+    patch_size = 16,
+    num_classes = 1000,
+    dim = 1024,
+    depth = 12,
+    heads = 8,
+    patch_merge_layer = 6,        # at which transformer layer to do patch merging
+    patch_merge_num_tokens = 8,   # the output number of tokens from the patch merge
+    mlp_dim = 2048,
+    dropout = 0.1,
+    emb_dropout = 0.1
+)
+
+img = torch.randn(4, 3, 256, 256)
+
+preds = v(img) # (4, 1000)
+```
+
+One can also use the `PatchMerger` module by itself
+
+```python
+import torch
+from vit_pytorch.vit_with_patch_merger import PatchMerger
+
+merger = PatchMerger(
+    dim = 1024,
+    num_tokens_out = 8   # output number of tokens
+)
+
+features = torch.randn(4, 256, 1024) # (batch, num tokens, dimension)
+
+out = merger(features) # (4, 8, 1024)
+```
+
+## Vision Transformer for Small Datasets
+
+<img src="./images/vit_for_small_datasets.png" width="400px"></img>
+
+This <a href="https://arxiv.org/abs/2112.13492">paper</a> proposes a new image to patch function that incorporates shifts of the image, before normalizing and dividing the image into patches. I have found shifting to be extremely helpful in some other transformers work, so decided to include this for further explorations. It also includes the `LSA` with the learned temperature and masking out of a token's attention to itself.
+
+You can use as follows:
+
+```python
+import torch
+from vit_pytorch.vit_for_small_dataset import ViT
+
+v = ViT(
+    image_size = 256,
+    patch_size = 16,
+    num_classes = 1000,
+    dim = 1024,
+    depth = 6,
+    heads = 16,
+    mlp_dim = 2048,
+    dropout = 0.1,
+    emb_dropout = 0.1
+)
+
+img = torch.randn(4, 3, 256, 256)
+
+preds = v(img) # (1, 1000)
+```
+
+You can also use the `SPT` from this paper as a standalone module
+
+```python
+import torch
+from vit_pytorch.vit_for_small_dataset import SPT
+
+spt = SPT(
+    dim = 1024,
+    patch_size = 16,
+    channels = 3
+)
+
+img = torch.randn(4, 3, 256, 256)
+
+tokens = spt(img) # (4, 256, 1024)
+```
+
+## Parallel ViT
+
+<img src="./images/parallel-vit.png" width="350px"></img>
+
+This <a href="https://arxiv.org/abs/2203.09795">paper</a> propose parallelizing multiple attention and feedforward blocks per layer (2 blocks), claiming that it is easier to train without loss of performance.
+
+You can try this variant as follows
+
+```python
+import torch
+from vit_pytorch.parallel_vit import ViT
+
+v = ViT(
+    image_size = 256,
+    patch_size = 16,
+    num_classes = 1000,
+    dim = 1024,
+    depth = 6,
+    heads = 8,
+    mlp_dim = 2048,
+    num_parallel_branches = 2,  # in paper, they claimed 2 was optimal
+    dropout = 0.1,
+    emb_dropout = 0.1
+)
+
+img = torch.randn(4, 3, 256, 256)
+
+preds = v(img) # (4, 1000)
+```
+
+## Learnable Memory ViT
+
+<img src="./images/learnable-memory-vit.png" width="350px"></img>
+
+This <a href="https://arxiv.org/abs/2203.15243">paper</a> shows that adding learnable memory tokens at each layer of a vision transformer can greatly enhance fine-tuning results (in addition to learnable task specific CLS token and adapter head).
+
+You can use this with a specially modified `ViT` as follows
+
+```python
+import torch
+from vit_pytorch.learnable_memory_vit import ViT, Adapter
+
+# normal base ViT
+
+v = ViT(
+    image_size = 256,
+    patch_size = 16,
+    num_classes = 1000,
+    dim = 1024,
+    depth = 6,
+    heads = 8,
+    mlp_dim = 2048,
+    dropout = 0.1,
+    emb_dropout = 0.1
+)
+
+img = torch.randn(4, 3, 256, 256)
+logits = v(img) # (4, 1000)
+
+# do your usual training with ViT
+# ...
+
+
+# then, to finetune, just pass the ViT into the Adapter class
+# you can do this for multiple Adapters, as shown below
+
+adapter1 = Adapter(
+    vit = v,
+    num_classes = 2,               # number of output classes for this specific task
+    num_memories_per_layer = 5     # number of learnable memories per layer, 10 was sufficient in paper
+)
+
+logits1 = adapter1(img) # (4, 2) - predict 2 classes off frozen ViT backbone with learnable memories and task specific head
+
+# yet another task to finetune on, this time with 4 classes
+
+adapter2 = Adapter(
+    vit = v,
+    num_classes = 4,
+    num_memories_per_layer = 10
+)
+
+logits2 = adapter2(img) # (4, 4) - predict 4 classes off frozen ViT backbone with learnable memories and task specific head
+
 ```
 
 ## Dino
@@ -742,6 +1115,41 @@ to cleanup the class and the hooks once you have collected enough data
 
 ```python
 v = v.eject()  # wrapper is discarded and original ViT instance is returned
+```
+
+## Accessing Embeddings
+
+You can similarly access the embeddings with the `Extractor` wrapper
+
+```python
+import torch
+from vit_pytorch.vit import ViT
+
+v = ViT(
+    image_size = 256,
+    patch_size = 32,
+    num_classes = 1000,
+    dim = 1024,
+    depth = 6,
+    heads = 16,
+    mlp_dim = 2048,
+    dropout = 0.1,
+    emb_dropout = 0.1
+)
+
+# import Recorder and wrap the ViT
+
+from vit_pytorch.extractor import Extractor
+v = Extractor(v)
+
+# forward pass now returns predictions and the attention maps
+
+img = torch.randn(1, 3, 256, 256)
+logits, embeddings = v(img)
+
+# there is one extra token due to the CLS token
+
+embeddings # (1, 65, 1024) - (batch x patches x model dim)
 ```
 
 ## Research Ideas
@@ -1046,6 +1454,17 @@ Coming from computer vision and new to transformers? Here are some resources tha
 ```
 
 ```bibtex
+@misc{wang2021crossformer,
+    title   = {CrossFormer: A Versatile Vision Transformer Hinging on Cross-scale Attention}, 
+    author  = {Wenxiao Wang and Lu Yao and Long Chen and Binbin Lin and Deng Cai and Xiaofei He and Wei Liu},
+    year    = {2021},
+    eprint  = {2108.00154},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```
+
+```bibtex
 @misc{caron2021emerging,
     title   = {Emerging Properties in Self-Supervised Vision Transformers},
     author  = {Mathilde Caron and Hugo Touvron and Ishan Misra and Hervé Jégou and Julien Mairal and Piotr Bojanowski and Armand Joulin},
@@ -1075,6 +1494,93 @@ Coming from computer vision and new to transformers? Here are some resources tha
     eprint  = {2111.09886},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@misc{fayyaz2021ats,
+    title   = {ATS: Adaptive Token Sampling For Efficient Vision Transformers},
+    author  = {Mohsen Fayyaz and Soroush Abbasi Kouhpayegani and Farnoush Rezaei Jafari and Eric Sommerlade and Hamid Reza Vaezi Joze and Hamed Pirsiavash and Juergen Gall},
+    year    = {2021},
+    eprint  = {2111.15667},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@misc{mehta2021mobilevit,
+    title   = {MobileViT: Light-weight, General-purpose, and Mobile-friendly Vision Transformer},
+    author  = {Sachin Mehta and Mohammad Rastegari},
+    year    = {2021},
+    eprint  = {2110.02178},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@misc{lee2021vision,
+    title   = {Vision Transformer for Small-Size Datasets}, 
+    author  = {Seung Hoon Lee and Seunghyun Lee and Byung Cheol Song},
+    year    = {2021},
+    eprint  = {2112.13492},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@misc{renggli2022learning,
+    title   = {Learning to Merge Tokens in Vision Transformers},
+    author  = {Cedric Renggli and André Susano Pinto and Neil Houlsby and Basil Mustafa and Joan Puigcerver and Carlos Riquelme},
+    year    = {2022},
+    eprint  = {2202.12015},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@misc{yang2022scalablevit,
+    title   = {ScalableViT: Rethinking the Context-oriented Generalization of Vision Transformer}, 
+    author  = {Rui Yang and Hailong Ma and Jie Wu and Yansong Tang and Xuefeng Xiao and Min Zheng and Xiu Li},
+    year    = {2022},
+    eprint  = {2203.10790},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@inproceedings{Touvron2022ThreeTE,
+    title   = {Three things everyone should know about Vision Transformers},
+    author  = {Hugo Touvron and Matthieu Cord and Alaaeldin El-Nouby and Jakob Verbeek and Herv'e J'egou},
+    year    = {2022}
+}
+```
+
+```bibtex
+@inproceedings{Sandler2022FinetuningIT,
+    title   = {Fine-tuning Image Transformers using Learnable Memory},
+    author  = {Mark Sandler and Andrey Zhmoginov and Max Vladymyrov and Andrew Jackson},
+    year    = {2022}
+}
+```
+
+```bibtex
+@inproceedings{Li2022SepViTSV,
+    title   = {SepViT: Separable Vision Transformer},
+    author  = {Wei Li and Xing Wang and Xin Xia and Jie Wu and Xuefeng Xiao and Minghang Zheng and Shiping Wen},
+    year    = {2022}
+}
+```
+
+```bibtex
+@inproceedings{Tu2022MaxViTMV,
+    title   = {MaxViT: Multi-Axis Vision Transformer},
+    author  = {Zhengzhong Tu and Hossein Talebi and Han Zhang and Feng Yang and Peyman Milanfar and Alan Conrad Bovik and Yinxiao Li},
+    year    = {2022}
 }
 ```
 

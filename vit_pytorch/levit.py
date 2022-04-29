@@ -52,6 +52,7 @@ class Attention(nn.Module):
         self.to_v = nn.Sequential(nn.Conv2d(dim, inner_dim_value, 1, bias = False), nn.BatchNorm2d(inner_dim_value))
 
         self.attend = nn.Softmax(dim = -1)
+        self.dropout = nn.Dropout(dropout)
 
         out_batch_norm = nn.BatchNorm2d(dim_out)
         nn.init.zeros_(out_batch_norm.weight)
@@ -70,8 +71,8 @@ class Attention(nn.Module):
         q_range = torch.arange(0, fmap_size, step = (2 if downsample else 1))
         k_range = torch.arange(fmap_size)
 
-        q_pos = torch.stack(torch.meshgrid(q_range, q_range), dim = -1)
-        k_pos = torch.stack(torch.meshgrid(k_range, k_range), dim = -1)
+        q_pos = torch.stack(torch.meshgrid(q_range, q_range, indexing = 'ij'), dim = -1)
+        k_pos = torch.stack(torch.meshgrid(k_range, k_range, indexing = 'ij'), dim = -1)
 
         q_pos, k_pos = map(lambda t: rearrange(t, 'i j c -> (i j) c'), (q_pos, k_pos))
         rel_pos = (q_pos[:, None, ...] - k_pos[None, :, ...]).abs()
@@ -100,6 +101,7 @@ class Attention(nn.Module):
         dots = self.apply_pos_bias(dots)
 
         attn = self.attend(dots)
+        attn = self.dropout(attn)
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', h = h, y = y)

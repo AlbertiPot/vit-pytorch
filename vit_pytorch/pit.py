@@ -48,6 +48,7 @@ class Attention(nn.Module):
         self.scale = dim_head ** -0.5
 
         self.attend = nn.Softmax(dim = -1)
+        self.dropout = nn.Dropout(dropout)
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
 
         self.to_out = nn.Sequential(
@@ -63,6 +64,7 @@ class Attention(nn.Module):
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
         attn = self.attend(dots)
+        attn = self.dropout(attn)
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
@@ -129,14 +131,15 @@ class PiT(nn.Module):
         mlp_dim,
         dim_head = 64,
         dropout = 0.,
-        emb_dropout = 0.
+        emb_dropout = 0.,
+        channels = 3
     ):
         super().__init__()
         assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
         assert isinstance(depth, tuple), 'depth must be a tuple of integers, specifying the number of blocks before each downsizing'
         heads = cast_tuple(heads, len(depth))
 
-        patch_dim = 3 * patch_size ** 2
+        patch_dim = channels * patch_size ** 2
 
         self.to_patch_embedding = nn.Sequential(
             nn.Unfold(kernel_size = patch_size, stride = patch_size // 2),
